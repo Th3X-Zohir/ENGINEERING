@@ -44,6 +44,9 @@ def log_task_save(sender, instance, created, **kwargs):
     from core.middleware import get_current_user
     user = get_current_user()
 
+    if user is None or not user.is_authenticated:
+        return
+
     before = None if created else _task_before_state.pop(str(instance.pk), None)
 
     AuditLog.objects.create(
@@ -61,13 +64,13 @@ def log_task_save(sender, instance, created, **kwargs):
 def log_task_delete(sender, instance, **kwargs):
     from core.middleware import get_current_user
     user = get_current_user()
-
-    AuditLog.objects.create(
-        organization=instance.organization,
-        user=user,
-        entity_type='Task',
-        entity_id=instance.id,
-        action=AuditLog.Action.DELETE,
-        before_state=task_to_dict(instance),
-        after_state=None,
-    )
+    if user and user.is_authenticated:
+        AuditLog.objects.create(
+            organization=instance.organization,
+            user=user,
+            entity_type='Task',
+            entity_id=instance.id,
+            action=AuditLog.Action.DELETE,
+            before_state=task_to_dict(instance),
+            after_state=None,
+        )

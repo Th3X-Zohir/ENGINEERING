@@ -6,6 +6,7 @@ from rest_framework.response import Response
 from rest_framework.parsers import MultiPartParser
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.filters import SearchFilter, OrderingFilter
+from drf_spectacular.utils import extend_schema
 
 from core.mixins import TenantQuerysetMixin
 from core.permissions import IsOrganizationAdmin, IsOrganizationMember
@@ -35,9 +36,15 @@ class TaskListCreateView(TenantQuerysetMixin, generics.ListCreateAPIView):
         return [IsOrganizationMember()]
 
     def perform_create(self, serializer):
+        assigned_to = serializer.validated_data.get('assigned_to')
+
+        if not assigned_to:
+            assigned_to = self.request.user
+
         org, _ = self.get_organization()
         serializer.save(
             organization=org,
+            assigned_to = assigned_to,
             created_by=self.request.user
         )
 
@@ -82,6 +89,7 @@ class PrioritizedTaskView(TenantQuerysetMixin, APIView):
 class AddDependencyView(TenantQuerysetMixin, APIView):
     permission_classes = [IsOrganizationMember]
 
+    @extend_schema(request=AddDependencySerializer)
     def post(self, request, org_id, task_id):
         org, _ = self.get_organization()
         try:
@@ -102,6 +110,21 @@ class AddDependencyView(TenantQuerysetMixin, APIView):
         return Response(serializer.errors, status=400)
 
 
+
+from drf_spectacular.types import OpenApiTypes
+@extend_schema(
+    request={
+        'multipart/form-data': {
+            'type': 'object',
+            'properties': {
+                'project_id': {'type': 'string', 'format': 'uuid'},
+                'file': {'type': 'string', 'format': 'binary'},
+            },
+            'required': ['project_id', 'file']
+        }
+    },
+    responses={207: OpenApiTypes.OBJECT},
+)
 class BulkImportView(TenantQuerysetMixin, APIView):
     permission_classes = [IsOrganizationAdmin]
     parser_classes = [MultiPartParser]

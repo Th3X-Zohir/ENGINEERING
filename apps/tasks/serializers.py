@@ -18,10 +18,10 @@ class TaskDependencySerializer(serializers.ModelSerializer):
 
 class TaskSerializer(serializers.ModelSerializer):
     created_by_email = serializers.EmailField(
-        source='created_by.email', read_only=True
+        source='created_by.email', read_only=True, allow_null=True
     )
     assigned_to_email = serializers.EmailField(
-        source='assigned_to.email', read_only=True
+        source='assigned_to.email', read_only=True, allow_null = True
     )
     dependencies = TaskDependencySerializer(many=True, read_only=True)
 
@@ -30,7 +30,7 @@ class TaskSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'title', 'description', 'status', 'priority',
             'due_date', 'project', 'organization',
-             'assigned_to_email',
+            'assigned_to', 'assigned_to_email',
             'created_by', 'created_by_email',
             'dependencies', 'version',
             'created_at', 'updated_at',
