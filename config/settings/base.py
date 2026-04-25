@@ -49,6 +49,7 @@ MIDDLEWARE = [
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
+    'core.middleware.CurrentUserMiddleware', 
 ]
 
 ROOT_URLCONF = 'config.urls'
@@ -144,13 +145,12 @@ SPECTACULAR_SETTINGS = {
             }
         }
     },
-    'COMPONENT_SPLIT_REQUEST': True
 }
 
 CORS_ALLOW_ALL_ORIGINS = True
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 LANGUAGE_CODE = 'en-us'
-TIME_ZONE = 'UTC'
+TIME_ZONE = 'Asia/Dhaka'
 USE_I18N = True
 USE_TZ = True
 STATIC_URL = '/static/'

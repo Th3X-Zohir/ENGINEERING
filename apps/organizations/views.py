@@ -3,7 +3,7 @@ from rest_framework.response import Response
 from .models import Organization, Membership
 from .serializers import OrganizationSerializer, MembershipSerializer
 from core.permissions import IsOrganizationMember, IsOrganizationOwner
-
+from rest_framework.permissions import IsAuthenticated
 
 
 class OrganizationListCreateView(generics.ListCreateAPIView):
@@ -23,7 +23,7 @@ class OrganizationListCreateView(generics.ListCreateAPIView):
 
 class OrganizationDetailView(generics.RetrieveUpdateDestroyAPIView):
     serializer_class = OrganizationSerializer
-    # permission_classes = [IsOrganizationMember]
+    permission_classes = [IsOrganizationMember]
 
     def get_queryset(self):
         return Organization.objects.filter(memberships__user=self.request.user)
