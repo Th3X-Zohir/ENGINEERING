@@ -68,6 +68,7 @@ class Task(models.Model):
     class Meta:
         db_table = 'tasks'
         indexes = [
+            models.Index(fields=['organization', '-created_at']),
             models.Index(fields=['organization', 'status']),
             models.Index(fields=['organization', 'assigned_to']),
             models.Index(fields=['organization', 'priority']),

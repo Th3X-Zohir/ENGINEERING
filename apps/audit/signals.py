@@ -1,14 +1,13 @@
 from django.db.models.signals import post_save, pre_save, post_delete
 from django.dispatch import receiver
+from django.db import transaction
 from apps.tasks.models import Task
 from .models import AuditLog
 
-# store before-state temporarily
 _task_before_state = {}
 
 
 def task_to_dict(task):
-    """Convert task fields to a plain dict for storing in audit log."""
     return {
         'title': task.title,
         'description': task.description,
@@ -22,10 +21,6 @@ def task_to_dict(task):
 
 @receiver(pre_save, sender=Task)
 def capture_before_state(sender, instance, **kwargs):
-    """
-    Before save — capture the old state if task already exists.
-    pre_save fires before the DB is updated.
-    """
     if instance.pk:
         try:
             old = Task.objects.get(pk=instance.pk)
@@ -36,41 +31,50 @@ def capture_before_state(sender, instance, **kwargs):
 
 @receiver(post_save, sender=Task)
 def log_task_save(sender, instance, created, **kwargs):
-    """
-    After save — create an audit log entry.
-    post_save fires after DB is updated.
-    """
-    # get current request user from thread-local (set by middleware)
     from core.middleware import get_current_user
     user = get_current_user()
-
-    if user is None or not user.is_authenticated:
-        return
-
     before = None if created else _task_before_state.pop(str(instance.pk), None)
+    action = AuditLog.Action.CREATE if created else AuditLog.Action.UPDATE
 
-    AuditLog.objects.create(
-        organization=instance.organization,
-        user=user,
-        entity_type='Task',
-        entity_id=instance.id,
-        action=AuditLog.Action.CREATE if created else AuditLog.Action.UPDATE,
-        before_state=before,
-        after_state=task_to_dict(instance),
-    )
+    # capture values now before transaction ends
+    org_id = instance.organization_id
+    entity_id = instance.id
+    after = task_to_dict(instance)
+    user_id = user.id if user and user.is_authenticated else None
+
+    def create_log():
+        AuditLog.objects.create(
+            organization_id=org_id,
+            user_id=user_id,
+            entity_type='Task',
+            entity_id=entity_id,
+            action=action,
+            before_state=before,
+            after_state=after,
+        )
+
+    transaction.on_commit(create_log)
 
 
 @receiver(post_delete, sender=Task)
 def log_task_delete(sender, instance, **kwargs):
     from core.middleware import get_current_user
     user = get_current_user()
-    if user and user.is_authenticated:
+
+    org_id = instance.organization_id
+    entity_id = instance.id
+    before = task_to_dict(instance)
+    user_id = user.id if user and user.is_authenticated else None
+
+    def create_log():
         AuditLog.objects.create(
-            organization=instance.organization,
-            user=user,
+            organization_id=org_id,
+            user_id=user_id,
             entity_type='Task',
-            entity_id=instance.id,
+            entity_id=entity_id,
             action=AuditLog.Action.DELETE,
-            before_state=task_to_dict(instance),
+            before_state=before,
             after_state=None,
         )
+
+    transaction.on_commit(create_log)

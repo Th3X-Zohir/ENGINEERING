@@ -4,6 +4,9 @@ from apps.organizations.models import Membership
 
 
 def get_user_role(user, organization_id):
+    if not user or not user.is_authenticated:
+        return None
+    
     try:
         m = Membership.objects.get(user=user, organization_id=organization_id)
         return m.role

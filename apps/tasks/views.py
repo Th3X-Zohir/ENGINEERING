@@ -8,6 +8,7 @@ from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.filters import SearchFilter, OrderingFilter
 from drf_spectacular.utils import extend_schema
 
+from core.pagination import TaskCursorPagination
 from core.mixins import TenantQuerysetMixin
 from core.permissions import IsOrganizationAdmin, IsOrganizationMember
 from .models import Task, TaskDependency
@@ -17,6 +18,7 @@ from .serializers import (
 )
 from .filters import TaskFilter
 from .services import get_prioritized_tasks, bulk_import_tasks
+
 
 
 class TaskListCreateView(TenantQuerysetMixin, generics.ListCreateAPIView):
@@ -29,6 +31,7 @@ class TaskListCreateView(TenantQuerysetMixin, generics.ListCreateAPIView):
     search_fields = ['title', 'description']
     ordering_fields = ['created_at', 'due_date', 'priority']
     ordering = ['-created_at']
+    pagination_class = TaskCursorPagination
 
     def get_permissions(self):
         if self.request.method == 'POST':
@@ -65,24 +68,26 @@ class TaskDetailView(TenantQuerysetMixin, generics.RetrieveUpdateDestroyAPIView)
         return TaskSerializer
 
 
-class PrioritizedTaskView(TenantQuerysetMixin, APIView):
-    permission_classes = [IsOrganizationMember]
 
+class PrioritizedTaskView(TenantQuerysetMixin, APIView):
     def get(self, request, org_id):
         org, _ = self.get_organization()
+        
+        # 1. Filter the base data
         base_qs = Task.objects.filter(
             organization=org
-        ).exclude(status='done')
+        ).exclude(status__in=['done', 'cancelled'])
 
-        scored = get_prioritized_tasks(base_qs)
+        # 2. Apply the SQL-optimized scoring
+        # (This line does NOT execute a query yet)
+        prioritized_qs = get_prioritized_tasks(base_qs)
 
-        # attach score to each task object
-        result = []
-        for task, score in scored:
-            task._urgency_score = score
-            result.append(task)
+        # 3. LIMIT the results in the database
+        # This prevents the app from ever loading 75,000 tasks into memory.
+        top_tasks = prioritized_qs[:20] 
 
-        serializer = PrioritizedTaskSerializer(result, many=True)
+        # 4. Serialize and Respond
+        serializer = PrioritizedTaskSerializer(top_tasks, many=True)
         return Response(serializer.data)
 
 

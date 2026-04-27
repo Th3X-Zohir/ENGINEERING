@@ -1,6 +1,9 @@
 from datetime import date
 from django.db import transaction
 from .models import Task, TaskDependency
+from django.db import models
+from django.db.models import F, ExpressionWrapper, Case, When, Value, Count, OuterRef, Subquery
+from django.db.models.functions import Now, ExtractDay, Greatest, Cast
 
 
 # ─── Cycle Detection ────────────────────────────────────────────────
@@ -32,78 +35,67 @@ def has_cycle(task_id, new_dep_id):
 
 
 # ─── Priority Score ──────────────────────────────────────────────────
-def calculate_urgency_score(task, assignee_workload: dict):
+def calculate_urgency_score():
     """
-    urgency_score =
-        (days_overdue * 3)
-        + (priority_weight * 2)
-        + dependency_block_count
-        + assignee_workload_penalty
+    Defines the mathematical formula for urgency as a Django SQL Expression.
+    Formula: (days_overdue * 3) + (priority_weight * 2) + block_count + workload_penalty
     """
-    today = date.today()
-
-    # days overdue (0 if not due yet)
-    days_overdue = 0
-    if task.due_date and task.due_date < today:
-        days_overdue = (today - task.due_date).days
-
-    # priority weight: low=1, medium=2, high=3, critical=4
-    priority_weight = Task.PRIORITY_WEIGHTS.get(task.priority, 1)
-
-    # how many tasks are blocked by THIS task
-    dependency_block_count = task.dependents.count()
-
-    # how many tasks the assignee already has (fetched once, passed in)
-    assignee_workload_penalty = 0
-    if task.assigned_to_id:
-        assignee_workload_penalty = assignee_workload.get(task.assigned_to_id, 0)
-
-    score = (
-        (days_overdue * 3)
-        + (priority_weight * 2)
-        + dependency_block_count
-        + assignee_workload_penalty
+    
+    # 1. Days Overdue Calculation
+    # If due_date is in the past, get days. If future, result is 0.
+    days_overdue_expr = Greatest(
+        ExtractDay(Now() - F('due_date')),
+        0
     )
-    return score
 
+    # 2. Priority Weight Mapping
+    # low=1, medium=2, high=3, critical=4
+    priority_weight_expr = Case(
+        When(priority='critical', then=Value(4)),
+        When(priority='high', then=Value(3)),
+        When(priority='medium', then=Value(2)),
+        default=Value(1),
+        output_field=models.IntegerField(),
+    )
+
+    # 3. Handling Nulls for Subqueries
+    # Ensures that if a task has 0 dependents or 0 workload, the math doesn't result in NULL
+    def clean_null(field):
+        return Case(When(**{f"{field}__isnull": False}, then=F(field)), default=Value(0))
+
+    # 4. The Combined Formula
+    return ExpressionWrapper(
+        (Cast(days_overdue_expr, models.IntegerField()) * 3) +
+        (priority_weight_expr * 2) +
+        clean_null('dependency_block_count') +
+        clean_null('workload_penalty'),
+        output_field=models.FloatField()
+    )
 
 def get_prioritized_tasks(queryset):
     """
-    Returns tasks sorted by urgency score descending.
-    Fetches workload counts in one query to avoid N+1.
+    Applies the urgency logic to a queryset using annotations.
     """
-    from django.db.models import Count
+    
+    # Subquery: Count tasks blocked by THIS task
+    dependents_subquery = TaskDependency.objects.filter(
+        depends_on_id=OuterRef('pk')
+    ).values('depends_on_id').annotate(count=Count('id')).values('count')
 
-    # single query to get workload per assignee
-    workload_qs = (
-        Task.objects
-        .filter(
-            assigned_to__isnull=False,
-            status__in=['todo', 'in_progress']
-        )
-        .values('assigned_to_id')
-        .annotate(count=Count('id'))
-    )
-    assignee_workload = {
-        row['assigned_to_id']: row['count']
-        for row in workload_qs
-    }
+    # Subquery: Count current assignee workload
+    workload_subquery = Task.objects.filter(
+        assigned_to_id=OuterRef('assigned_to_id'),
+        status__in=['todo', 'in_progress']
+    ).values('assigned_to_id').annotate(count=Count('id')).values('count')
 
-    # eager load related data to avoid N+1
-    tasks = queryset.prefetch_related('dependents', 'dependencies').select_related(
-        'assigned_to', 'created_by', 'project'
-    )
+    return queryset.annotate(
+        dependency_block_count=Subquery(dependents_subquery, output_field=models.IntegerField()),
+        workload_penalty=Subquery(workload_subquery, output_field=models.IntegerField()),
+    ).annotate(
+        # Attach the score using our separate calculation function
+        _urgency_score=calculate_urgency_score()
+    ).order_by('-_urgency_score')
 
-    # score each task in Python
-    scored = [
-        (task, calculate_urgency_score(task, assignee_workload))
-        for task in tasks
-    ]
-
-    # sort descending by score
-    scored.sort(key=lambda x: x[1], reverse=True)
-
-    return scored
 
 
 # ─── Bulk Import ─────────────────────────────────────────────────────
