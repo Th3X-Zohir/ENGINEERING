@@ -959,7 +959,7 @@ Tested against **100,000 task records** on local PostgreSQL (no tuning).
 | Endpoint | Time | Queries | Notes |
 |----------|------|---------|-------|
 | `GET /tasks/` | **4.68ms** | 2 | Cursor pagination + indexes |
-| `GET /tasks/prioritized/` | **1.39ms** | 1 | Full SQL annotation, top 500 active tasks |
+| `GET /tasks/prioritized/` | **1.39ms** | 1 | Full SQL annotation, top 20 active tasks |
 | `GET /audit/task/{id}` | **1.32ms** | 1 | Indexed on `(entity_type, entity_id)` |
 | Membership check (per request) | **0.37ms** | 1 | Indexed unique lookup |
 
@@ -1040,3 +1040,6 @@ python scripts/benchmark.py
 ```
 
 Creates 100,000 tasks (if not already present) and measures query times for each endpoint pattern. Results are printed to stdout.
+
+## Author 
+Md. Sakibur Rahman 
